@@ -44,6 +44,7 @@ class JSONWebSignatureSerializer(Serializer):
         signer=None,
         signer_kwargs=None,
         algorithm_name=None,
+        check_algorithm=False,
     ):
         Serializer.__init__(
             self,
@@ -58,6 +59,7 @@ class JSONWebSignatureSerializer(Serializer):
             algorithm_name = self.default_algorithm
         self.algorithm_name = algorithm_name
         self.algorithm = self.make_algorithm(algorithm_name)
+        self.check_algorithm = check_algorithm 
 
     def load_payload(self, payload, serializer=None, return_header=False):
         payload = want_bytes(payload)
@@ -126,6 +128,12 @@ class JSONWebSignatureSerializer(Serializer):
         header["alg"] = self.algorithm_name
         return header
 
+    def get_signing_algorithm(self, payload):
+        base64d_header, base64d_payload = want_bytes(payload).split(b".", 1)
+        header_algorithm = Serializer.load_payload(self, base64_decode(base64d_header), serializer=json).get('alg')
+        algorithm = self.make_algorithm(header_algorithm)
+        return algorithm
+
     def dumps(self, obj, salt=None, header_fields=None):
         """Like :meth:`.Serializer.dumps` but creates a JSON Web
         Signature. It also allows for specifying additional fields to be
@@ -140,11 +148,12 @@ class JSONWebSignatureSerializer(Serializer):
         it will return a tuple of payload and header.
         """
         payload, header = self.load_payload(
-            self.make_signer(salt, self.algorithm).unsign(want_bytes(s)),
+            self.make_signer(salt, self.get_signing_algorithm(s)).unsign(want_bytes(s)),
             return_header=True,
         )
         if header.get("alg") != self.algorithm_name:
-            raise BadHeader("Algorithm mismatch", header=header, payload=payload)
+            if self.check_algorithm or header.get("alg") == 'none':
+                raise BadHeader("Algorithm mismatch", header=header, payload=payload)
         if return_header:
             return payload, header
         return payload
